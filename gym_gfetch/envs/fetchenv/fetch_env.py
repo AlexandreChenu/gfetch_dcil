@@ -9,8 +9,8 @@
 # limitations under the License.
 
 
-# from .import_ai import *
-from import_ai import *
+from .import_ai import *
+# from import_ai import *
 
 from abc import ABC
 from abc import abstractmethod
@@ -29,17 +29,20 @@ gym._gym_disable_underscore_compat = True
 
 import types
 os.environ["PATH"] = os.environ["PATH"].replace('/usr/local/nvidia/bin', '')
-try:
-    import mujoco_py
-    import gym.envs.robotics.utils
-    import gym.envs.robotics.rotations
-except Exception:
-    print('WARNING: could not import mujoco_py. This means robotics environments will not work')
+# try:
+import mujoco_py
+
+# except Exception:
+    # print('WARNING: could not import mujoco_py. This means robotics environments will not work')
 import gym.spaces
 from scipy.spatial.transform import Rotation
 from collections import defaultdict, namedtuple
 import os
 from gym.envs.mujoco import mujoco_env
+import gym_robotics
+from gym_robotics.envs.utils import reset_mocap2body_xpos
+from gym_robotics.envs.rotations import mat2euler
+
 
 if torch.cuda.is_available():
   device = torch.device("cuda")
@@ -377,7 +380,7 @@ class ComplexFetchEnv:
             pos_delta = action[:, :3]
             rot_delta = action[:, 3:]
 
-            gym.envs.robotics.utils.reset_mocap2body_xpos(self.sim)
+            reset_mocap2body_xpos(self.sim)
 
             # Note: we use np.roll here because Rotation assumes an (x, y, z, w) representation while
             # mujoco assumes a (w, x, y, z) representation.
@@ -621,7 +624,7 @@ class ComplexFetchEnv:
             else:
                 all_state = np.empty(dim_size * n_dims)
 
-            eulers = gym.envs.robotics.rotations.mat2euler(
+            eulers = mat2euler(
                 self.sim.data.body_xmat[self.filtered_idxs_for_full_state].reshape((len(self.filtered_idxs_for_full_state), 3, 3))
             )
             all_state[:dim_size] = eulers.flatten()
@@ -643,7 +646,7 @@ class ComplexFetchEnv:
             # else:
             #     all_state = np.empty(dim_size * n_dims + dim_size_quat)
             #
-            # quats = gym.envs.robotics.rotations.mat2quat(
+            # quats = gym_robotics.rotations.mat2quat(
             #     self.sim.data.body_xmat[self.filtered_idxs_for_full_state].reshape((len(self.filtered_idxs_for_full_state), 3, 3))
             # )
             # dim_size_quat = len(self.filtered_idxs_for_full_state) * 4
@@ -990,7 +993,7 @@ class GFetch(gym.Env, utils.EzPickle, ABC):
     #     return self.state_vector()
 
     ## TODO: change infos & reward for tensor version?
-    ## TODO: change for multiprocessing? 
+    ## TODO: change for multiprocessing?
     def step(self, action):
         rewards = []
         dones = []

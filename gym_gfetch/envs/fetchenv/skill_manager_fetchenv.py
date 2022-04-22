@@ -17,8 +17,6 @@ class SkillsManager():
 	def __init__(self, demo_path, env):
 
 		self.env = env
-		self.num_envs = env.num_envs
-		self.device = env.device
 
 		self.eps_state = 0.5 ## threshold distance in goal space for skill construction
 		self.beta = 2.
@@ -37,16 +35,17 @@ class SkillsManager():
 
 		self.L_states, self.L_sim_states, self.L_budgets = self.clean_demo(self.L_full_demonstration)
 
-		# self.L_states = self.L_states[:2]
-		# self.L_budgets = self.L_budgets[:1]
+		self.L_states = self.L_states[:3]
+		self.L_sim_states = self.L_sim_states[:3]
+		self.L_budgets = self.L_budgets[:2]
+
+		print("self.L_budgets = ", self.L_budgets)
 
 		self.nb_skills = len(self.L_states)-1
-		self.states = torch.stack(self.L_states) ## tensor versions
-		self.budgets = torch.stack(self.L_budgets)
 
 		## init indx for start and goal states
-		self.indx_start = torch.zeros((self.num_envs,1)).int().to(self.device)
-		self.indx_goal = torch.ones((self.num_envs,1)).int().to(self.device)
+		self.indx_start = 0
+		self.indx_goal = 1
 
 		## a list of list of results per skill
 		self.L_skills_results = [[] for _ in self.L_states]
@@ -95,16 +94,13 @@ class SkillsManager():
 			# cumulative distance
 			while sum_dist <= self.eps_state and i + k < len(L_inner_states) - 1:
 				self.env.env.set_inner_state(L_inner_states[i+k-1])
-				prev_state = torch.clone(self.env.state_vector())
+				prev_state = self.env.state_vector().copy()
 				prev_sim_state = copy.deepcopy(self.env.env.sim.get_state())
 				self.env.env.set_inner_state(L_inner_states[i+k])
-				new_state = torch.clone(self.env.state_vector())
+				new_state = self.env.state_vector().copy()
 				new_sim_state = copy.deepcopy(self.env.env.sim.get_state())
 
-				print("\ng1 = ", self.env.project_to_goal_space(new_state))
-				print("g2 = ", self.env.project_to_goal_space(prev_state))
-
-				sum_dist += self.env.goal_distance(self.env.project_to_goal_space(new_state), self.env.project_to_goal_space(prev_state))[0]
+				sum_dist += self.env.goal_distance(self.env.project_to_goal_space(new_state), self.env.project_to_goal_space(prev_state))
 				k += 1
 			if sum_dist > self.eps_state or i + k == len(L_inner_states) - 1:
 				L_states_clean.append(new_state)
@@ -112,7 +108,7 @@ class SkillsManager():
 				L_sim_states_clean.append(new_sim_state)
 
 			# L_budgets.append(int(self.beta*k))
-			L_budgets.append(torch.tensor(np.tile(np.array([int(self.beta*k)]), (self.num_envs, 1))))
+			L_budgets.append(int(self.beta*k))
 
 			i = i + k
 
@@ -123,13 +119,13 @@ class SkillsManager():
 		"""
 		Get starting state, length and goal associated to a given skill
 		"""
-		assert torch.sum((skill_indx < 0).int()) == 0.
-		assert torch.sum((skill_indx > len(self.L_states)) == 0.)
+		assert skill_indx > 0
+		assert skill_indx < len(self.L_states)
 
 		indx_start = skill_indx - self.delta_step
 		indx_goal = skill_indx
 
-		length_skill = self.budgets[indx_start.view(-1).long(),0,:]
+		length_skill = self.L_budgets[indx_start]
 
 		starting_state = self.get_starting_state(indx_start)
 		goal_state = self.get_goal_state(indx_goal)
@@ -140,13 +136,13 @@ class SkillsManager():
 		"""
 		Get starting state, length and goal associated to a given skill
 		"""
-		assert torch.sum((skill_indx < 0).int()) == 0.
-		assert torch.sum((skill_indx > len(self.L_states)) == 0.)
+		assert skill_indx > 0
+		assert skill_indx < len(self.L_states)
 
 		self.indx_start = skill_indx - self.delta_step
 		self.indx_goal = skill_indx
 
-		length_skill = self.budgets[self.indx_start.view(-1).long(),0,:]
+		length_skill = self.budgets[self.indx_start]
 
 		starting_state = self.get_starting_state(self.indx_start)
 		goal_state = self.get_goal_state(self.indx_goal)
@@ -155,62 +151,59 @@ class SkillsManager():
 
 	def get_starting_state(self, indx_start):
 
-		start_sim_state = []
-		for env_indx in range(self.env.num_envs):
-			start_sim_state.append(self.L_sim_states[indx_start[env_indx][0]])
-
-		return torch.clone(self.states[indx_start.long().view(-1),0,:]), start_sim_state
+		return self.L_states[indx_start], self.L_sim_states[indx_start]
 
 	def get_goal_state(self, indx_goal):
-		return torch.clone(self.states[indx_goal.long().view(-1),0,:])
-
-	def add_success_overshoot(self,skill_indx):
-		self.L_overshoot_feasible[skill_indx-1]=True
-		return
-
-	def add_success(self, skill_indx):
-		"""
-		Monitor successes for a given skill (to bias skill selection)
-		"""
-		self.L_skills_results[skill_indx].append(1)
-
-		if len(self.L_skills_results[skill_indx]) > self.skill_window:
-			self.L_skills_results[skill_indx].pop(0)
-
-		return
-
-	def add_failure(self, skill_indx):
-		"""
-		Monitor failures for a given skill (to bias skill selection)
-		"""
-		self.L_skills_results[skill_indx].append(0)
-
-		if len(self.L_skills_results[skill_indx]) > self.skill_window:
-			self.L_skills_results[skill_indx].pop(0)
-
-		return
-
-	def get_skill_success_rate(self, skill_indx):
-
-		nb_skills_success = self.L_skills_results[skill_indx].count(1)
-		s_r = float(nb_skills_success/len(self.L_skills_results[skill_indx]))
-
-		## keep a small probability for successful skills to be selected in order
-		## to avoid catastrophic forgetting
-		if s_r <= 0.1:
-			s_r = 10
-		else:
-			s_r = 1./s_r
-
-		return s_r
-
-	def get_skills_success_rates(self):
-
-		L_rates = []
-		for i in range(self.delta_step, len(self.L_states)):
-			L_rates.append(self.get_skill_success_rate(i))
-
-		return L_rates
+		# print("indx_goal = ", indx_goal)
+		return self.L_states[indx_goal]
+	#
+	# def add_success_overshoot(self,skill_indx):
+	# 	self.L_overshoot_feasible[skill_indx-1]=True
+	# 	return
+	#
+	# def add_success(self, skill_indx):
+	# 	"""
+	# 	Monitor successes for a given skill (to bias skill selection)
+	# 	"""
+	# 	self.L_skills_results[skill_indx].append(1)
+	#
+	# 	if len(self.L_skills_results[skill_indx]) > self.skill_window:
+	# 		self.L_skills_results[skill_indx].pop(0)
+	#
+	# 	return
+	#
+	# def add_failure(self, skill_indx):
+	# 	"""
+	# 	Monitor failures for a given skill (to bias skill selection)
+	# 	"""
+	# 	self.L_skills_results[skill_indx].append(0)
+	#
+	# 	if len(self.L_skills_results[skill_indx]) > self.skill_window:
+	# 		self.L_skills_results[skill_indx].pop(0)
+	#
+	# 	return
+	#
+	# def get_skill_success_rate(self, skill_indx):
+	#
+	# 	nb_skills_success = self.L_skills_results[skill_indx].count(1)
+	# 	s_r = float(nb_skills_success/len(self.L_skills_results[skill_indx]))
+	#
+	# 	## keep a small probability for successful skills to be selected in order
+	# 	## to avoid catastrophic forgetting
+	# 	if s_r <= 0.1:
+	# 		s_r = 10
+	# 	else:
+	# 		s_r = 1./s_r
+	#
+	# 	return s_r
+	#
+	# def get_skills_success_rates(self):
+	#
+	# 	L_rates = []
+	# 	for i in range(self.delta_step, len(self.L_states)):
+	# 		L_rates.append(self.get_skill_success_rate(i))
+	#
+	# 	return L_rates
 
 
 	def sample_skill_indx(self):
@@ -258,19 +251,18 @@ class SkillsManager():
 
 		## uniform sampling
 		else:
-			new_skill_indx = torch.randint(1, self.nb_skills+1, (self.num_envs, 1))
+			new_skill_indx = np.random.randint(1, self.nb_skills+1)
 
-		return new_skill_indx.int()
+		return new_skill_indx
 
 	def shift_goal(self):
 		"""
 		Returns next goal state corresponding
 		"""
-		cur_indx = torch.clone(self.indx_goal)
-		next_indx = cur_indx + 1
-		next_skill_avail = (next_indx <= self.nb_skills).int()
-		next_skill_indx = torch.where(next_skill_avail == 1, next_indx, cur_indx)
-		self.indx_goal = next_skill_indx
+		next_skill_indx = self.indx_goal + 1
+		next_skill_avail = (next_skill_indx <= self.nb_skills)
+		if next_skill_avail:
+			self.indx_goal = next_skill_indx
 		next_goal_state = self.get_goal_state(self.indx_goal)
 
 		return next_goal_state, next_skill_avail
@@ -279,11 +271,13 @@ class SkillsManager():
 		"""
 		Returns next goal state corresponding
 		"""
-		cur_indx = torch.clone(self.indx_goal)
-		next_indx = cur_indx + 1
-		next_skill_avail = (next_indx <= self.nb_skills).int()
-		next_skill_indx = torch.where(next_skill_avail == 1, next_indx, cur_indx)
-		next_goal_state = self.get_goal_state(next_skill_indx)
+		next_skill_indx = self.indx_goal + 1
+		next_skill_avail = (next_skill_indx <= self.nb_skills)
+
+		if next_skill_avail:
+			next_goal_state = self.get_goal_state(next_skill_indx)
+		else:
+			next_goal_state = self.get_goal_state(self.indx_goal)
 
 		return next_goal_state, next_skill_avail
 
@@ -294,9 +288,9 @@ class SkillsManager():
 		"""
 
 		next_indx = cur_indx + 1
-		next_skill_avail = (next_indx <= self.nb_skills).int()
+		next_skill_avail = (next_indx <= self.nb_skills)
 
-		return next_indx.int(), next_skill_avail.int()
+		return next_indx, next_skill_avail
 
 	def _select_skill(self, done, is_success, init=False, do_overshoot = True):
 		"""
@@ -304,43 +298,26 @@ class SkillsManager():
 		"""
 
 		sampled_skill_indx = self.sample_skill_indx() ## return tensor of new indices
-		next_skill_indx, next_skill_avail = self.next_skill_indx(torch.clone(self.indx_goal)) ## return tensor of next skills indices
+		next_skill_indx, next_skill_avail = self.next_skill_indx(self.indx_goal) ## return tensor of next skills indices
 
-		#print("is success = ", is_success)
-		#print("next_skill_avail = ", next_skill_avail)
-		## check if overshoot is possible (success + shifted skill avail)
-		overshoot_possible = torch.logical_and(is_success, next_skill_avail).int()
-
-		# print("overshoot_possible = ", overshoot_possible)
-		#
-		# print("next_skill_indx = ", next_skill_indx)
-		# print("sampled_skill_indx = ", sampled_skill_indx)
-
-		## if overshoot possible, choose next skill indx, otherwise, sample new skill indx
-		is_success_skill_indx = torch.where(overshoot_possible == 1, next_skill_indx, sampled_skill_indx)
-
-		# print("is_success_skill_indx = ", is_success_skill_indx)
-
-		## sample new skill indx for truncated episodes
-		new_indx_goal = torch.where(is_success == 1, is_success_skill_indx, sampled_skill_indx)
-
-		# print("new_skill_indx = ", new_skill_indx)
-		# print("done = ", done)
-		# print("self.indx_goal = ", self.indx_goal)
-
-		self.indx_goal = torch.where(done == 1, new_indx_goal, self.indx_goal.int())
+		if is_success and do_overshoot and next_skill_avail:
+			self.indx_goal = next_skill_indx
+		else:
+			self.indx_goal = sampled_skill_indx
 
 		# print("self.indx_goal = ", self.indx_goal)
 
 		## skill indx coorespond to a goal indx
 		self.indx_start = (self.indx_goal - self.delta_step)
-		# print("self.indx_start = ", self.indx_start.view(-1))
-		length_skill = self.budgets[self.indx_start.view(-1).long(),0,:]
+
+		# print("self.indx_start = ", self.indx_start)
+
+		length_skill = self.L_budgets[self.indx_start]
 
 		starting_state = self.get_starting_state(self.indx_start)
 		goal_state = self.get_goal_state(self.indx_goal)
 
-		return starting_state, length_skill, goal_state, overshoot_possible
+		return starting_state, length_skill, goal_state
 
 
 	def _random_skill(self):
@@ -352,12 +329,10 @@ class SkillsManager():
 
 		self.indx_goal = sampled_skill_indx
 
-		# print("self.indx_goal = ", self.indx_goal)
-
 		## skill indx coorespond to a goal indx
 		self.indx_start = (self.indx_goal - self.delta_step)
 		# print("self.indx_start = ", self.indx_start.view(-1))
-		length_skill = self.budgets[self.indx_start.view(-1).long(),0,:]
+		length_skill = self.L_budgets[self.indx_start]
 
 		starting_state = self.get_starting_state(self.indx_start)
 		goal_state = self.get_goal_state(self.indx_goal)
@@ -379,7 +354,7 @@ if (__name__=='__main__'):
 
 	traj = []
 
-	env = GFetchDCIL(device="cpu", num_envs=2)
+	env = GFetchDCIL()
 	env.reset()
 
 	demo_path = "/Users/chenu/Desktop/PhD/github/dcil/demos/fetchenv/demo_set/1.demo"
@@ -390,41 +365,41 @@ if (__name__=='__main__'):
 	# print("length budgets = ", len(sm.L_budgets))
 
 	# # print("states = ", sm.states)
-	print("states.shape = ", sm.states.shape)
-	# # print("budget = ", sm.budgets)
-	print("budget.shape = ", sm.budgets.shape)
-	#
-	# sm._random_skill()
-	#
+	# print("states.shape = ", sm.states.shape)
+	# # # print("budget = ", sm.budgets)
+	# print("budget.shape = ", sm.budgets.shape)
+	# #
+	# # sm._random_skill()
+	# #
 	print("start indx = ", sm.indx_start)
 	print("goal indx = ", sm.indx_goal)
 
 
 
-	# next_skill_indx, next_skill_avail = sm.next_skill_indx()
+	next_skill_indx, next_skill_avail = sm.next_skill_indx(sm.indx_goal)
 	#
-	# print("next skill indx = ", next_skill_indx)
-	# print("next skill avail = ", next_skill_avail)
+	print("next skill indx = ", next_skill_indx)
+	print("next skill avail = ", next_skill_avail)
 	#
 	sampled_skill_indx = sm.sample_skill_indx()
-	#
+	# #
 	print("sampled skill indx = ", sampled_skill_indx)
+	# #
+	# # print("states = ", sm.states[:,0,:])
+	# #
 	#
-	# print("states = ", sm.states[:,0,:])
+	# skill_indx = torch.ones((sm.num_envs,1)).int().to(sm.device)*14
 	#
-
-	skill_indx = torch.ones((sm.num_envs,1)).int().to(sm.device)*14
-
-	# start_state, budget, goal_state = sm.get_skill(skill_indx)
+	start_state, budget, goal_state = sm.get_skill(sampled_skill_indx)
 	# start_state, budget, goal_state = sm.get_skill(sampled_skill_indx)
-	start_state, budget, goal_state = sm.set_skill(skill_indx)
+	# start_state, budget, goal_state = sm.set_skill(skill_indx)
 
 	print("budget = ", budget)
 	print("goal_state = ", goal_state)
 	print("start_state = ", start_state)
 
-	next_goal_state, next_skill_avail = sm.next_goal()
-	print("next_goal_state = ", next_goal_state)
-	print("next_skill_avail = ", next_skill_avail)
+	# next_goal_state, next_skill_avail = sm.next_goal()
+	# print("next_goal_state = ", next_goal_state)
+	# print("next_skill_avail = ", next_skill_avail)
 
 	# print(env.state)

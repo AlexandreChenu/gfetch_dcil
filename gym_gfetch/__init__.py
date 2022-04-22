@@ -16,17 +16,23 @@ print("|    gym version and path:", gym.__version__, gym.__path__)
 print("|    REGISTERING GFetch-v0 from", envpath())
 register(
     id="GFetch-v0",
-    entry_point="gym_gmazes.envs:GFetch",
+    entry_point="gym_gfetch.envs:GFetch",
+    max_episode_steps=200,
+    reward_threshold=1.,
 )
 
 print("|    REGISTERING GFetchGoal-v0 from", envpath())
 register(
     id="GFetchGoal-v0",
-    entry_point="gym_gmazes.envs:GFetchGoal",
+    entry_point="gym_gfetch.envs:GFetchGoal",
+    max_episode_steps=200,
+    reward_threshold=1.,
 )
 
 print("|    REGISTERING GFetchDCIL-v0 from", envpath())
 register(
     id="GFetchDCIL-v0",
-    entry_point="gym_gmazes.envs:GFetchDCIL",
+    entry_point="gym_gfetch.envs:GFetchDCIL",
+    max_episode_steps=200,
+    reward_threshold=1.,
 )
