@@ -33,6 +33,5 @@ print("|    REGISTERING GFetchDCIL-v0 from", envpath())
 register(
     id="GFetchDCIL-v0",
     entry_point="gym_gfetch.envs:GFetchDCIL",
-    max_episode_steps=200,
     reward_threshold=1.,
 )

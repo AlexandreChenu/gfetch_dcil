@@ -215,8 +215,8 @@ class ComplexFetchEnv:
         self.object_names = sorted([name for name in self.sim.model.body_names if 'obj' in name])
         self.object_ids = [self.sim.model.body_name2id(name) for name in self.object_names]
 
-        for name in self.object_names:
-            print("name: ", name)
+        # for name in self.object_names:
+        #     print("name: ", name)
 
         self.grip_id = self.sim.model.body_name2id('gripper_link')
 

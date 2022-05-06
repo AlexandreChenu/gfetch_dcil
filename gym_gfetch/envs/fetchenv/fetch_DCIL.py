@@ -214,7 +214,7 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
     def __init__(self):
         super().__init__()
 
-        self._goal_dim = 3
+        self._goal_dim = 6 ## TODO: set automatically
         high_goal = np.ones(self._goal_dim)
         low_goal = -high_goal
 
@@ -314,8 +314,8 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
         gripper_pos = self.get_gripper_pos(state)
         object_pos = self.get_object_pos(state)
 
-        # return np.concatenate((gripper_pos, object_pos), axis=-1)
-        return gripper_pos
+        return np.concatenate((gripper_pos, object_pos), axis=-1)
+        # return gripper_pos
 
     def get_gripper_pos(self, state):
         """
@@ -337,7 +337,7 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 
 
 class GFetchDCIL(GFetchGoal):
-    def __init__(self):
+    def __init__(self, demo_path):
         super().__init__()
 
         self.done = False
@@ -347,10 +347,11 @@ class GFetchDCIL(GFetchGoal):
         self.goal = None
 
         self.truncation = None
-        self.max_episode_steps = 20
-        self.do_overshoot = True
+        self.max_episode_steps = 50
+        self.do_overshoot = False
 
-        self.skill_manager = SkillsManager("/Users/chenu/Desktop/PhD/github/dcil/demos/fetchenv/demo_set/1.demo", self) ## skill length in time-steps
+        self.demo_path = demo_path
+        self.skill_manager = SkillsManager(self.demo_path, self) ## skill length in time-steps
 
 
     @torch.no_grad()
@@ -390,9 +391,9 @@ class GFetchDCIL(GFetchGoal):
 
         return (
             {
-                'observation': self.state,
-                'achieved_goal': self.project_to_goal_space(self.state),
-                'desired_goal': self.goal,
+                'observation': self.state.copy(),
+                'achieved_goal': self.project_to_goal_space(self.state).copy(),
+                'desired_goal': self.goal.copy(),
             },
             reward,
             self.done,
@@ -412,9 +413,9 @@ class GFetchDCIL(GFetchGoal):
         self.goal = goal
 
         return {
-            'observation': self.state,
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal,
+            'observation': self.state.copy(),
+            'achieved_goal': self.project_to_goal_space(self.state).copy(),
+            'desired_goal': self.goal.copy(),
         }
 
     def shift_goal(self):
@@ -424,9 +425,9 @@ class GFetchDCIL(GFetchGoal):
         self.goal = goal
 
         return {
-            'observation': self.state,
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal,
+            'observation': self.state.copy(),
+            'achieved_goal': self.project_to_goal_space(self.state).copy(),
+            'desired_goal': self.goal.copy(),
         }
 
     @torch.no_grad()
@@ -439,35 +440,34 @@ class GFetchDCIL(GFetchGoal):
     @torch.no_grad()
     def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
 
-        _start_state, length_skill, goal_state = self._select_skill()
+        _start_state, length_skill, goal_state, overshoot_possible = self._select_skill()
         start_state, start_sim_state = _start_state
 
-        # print("length_skill = ", length_skill)
+        if self.done:
+            if self.is_success:
+                self.skill_manager.add_success(self.skill_manager.indx_goal)
+            else:
+                self.skill_manager.add_failure(self.skill_manager.indx_goal)
 
-        ## set sim state for each environment
-        self.env.sim.set_state(start_sim_state)
+        ## reset robot to known state if no overshoot possible
+        if not (self.is_success and self.do_overshoot and overshoot_possible):
+            self.env.sim.set_state(start_sim_state)
+            self.state = start_state.copy()
 
         goal = self.project_to_goal_space(goal_state)
+        self.goal = goal.copy()
 
-        self.state = start_state.copy()
         self.steps = 0
         self.max_episode_steps = length_skill
-
-        # print("self.max_episode_steps = ", self.max_episode_steps)
-
-        # print("self.steps = ", self.steps)
-        # print("max_episode_steps = ", self.max_episode_steps)
-
-        self.goal = goal.copy()
 
         #achieved_goal = self.project_to_goal_space(self.state)
         # print("achieved goal from reset_done = ", achieved_goal)
         # sys.stdout.flush()
 
         return {
-            'observation': self.state,
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal,
+            'observation': self.state.copy(),
+            'achieved_goal': self.project_to_goal_space(self.state).copy(),
+            'desired_goal': self.goal.copy(),
         }
 
     @torch.no_grad()
@@ -477,16 +477,14 @@ class GFetchDCIL(GFetchGoal):
         _start_state, length_skill, goal_state = self.skill_manager.get_skill(init_indx)
         start_state, start_sim_state = _start_state
 
-        self.state = start_state.copy()
-
-        goal = self.project_to_goal_space(goal_state)
-
         ## set sim state for each environment
-        self.env.sim.set_state(self.init_sim_state)
+        self.env.sim.set_state(start_sim_state)
+        self.state = start_state.copy()
 
         self.max_episode_steps = length_skill
         self.steps = 0
 
+        goal = self.project_to_goal_space(goal_state)
         self.goal = goal.copy()
 
         achieved_goal = self.project_to_goal_space(self.state)
@@ -494,9 +492,9 @@ class GFetchDCIL(GFetchGoal):
         # sys.stdout.flush()
 
         return {
-            'observation': self.state,
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal,
+            'observation': self.state.copy(),
+            'achieved_goal': self.project_to_goal_space(self.state).copy(),
+            'desired_goal': self.goal.copy(),
         }
 
 

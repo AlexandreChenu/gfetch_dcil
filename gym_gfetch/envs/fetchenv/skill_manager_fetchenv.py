@@ -35,11 +35,11 @@ class SkillsManager():
 
 		self.L_states, self.L_sim_states, self.L_budgets = self.clean_demo(self.L_full_demonstration)
 
-		self.L_states = self.L_states[:3]
-		self.L_sim_states = self.L_sim_states[:3]
-		self.L_budgets = self.L_budgets[:2]
+		self.L_states = self.L_states[-4:]
+		self.L_sim_states = self.L_sim_states[-4:]
+		self.L_budgets = self.L_budgets[-3:]
 
-		print("self.L_budgets = ", self.L_budgets)
+		# print("self.L_budgets = ", self.L_budgets)
 
 		self.nb_skills = len(self.L_states)-1
 
@@ -59,17 +59,13 @@ class SkillsManager():
 		self.delta_step = 1
 		self.dist_threshold = 0.1
 
-	def extract_from_demo(self, demo_path, verbose=1):
+	def extract_from_demo(self, demo_path, verbose=0):
 		"""
 		Extract demo from path
 		"""
 		L_inner_states = []
 
-		if verbose:
-			print("filename :\n", demo_path)
-		if not os.path.isfile(demo_path):
-			print ("File does not exist.")
-			return
+		assert os.path.isfile(demo_path)
 
 		with open(demo_path, "rb") as f:
 			demo = pickle.load(f)
@@ -160,50 +156,50 @@ class SkillsManager():
 	# def add_success_overshoot(self,skill_indx):
 	# 	self.L_overshoot_feasible[skill_indx-1]=True
 	# 	return
-	#
-	# def add_success(self, skill_indx):
-	# 	"""
-	# 	Monitor successes for a given skill (to bias skill selection)
-	# 	"""
-	# 	self.L_skills_results[skill_indx].append(1)
-	#
-	# 	if len(self.L_skills_results[skill_indx]) > self.skill_window:
-	# 		self.L_skills_results[skill_indx].pop(0)
-	#
-	# 	return
-	#
-	# def add_failure(self, skill_indx):
-	# 	"""
-	# 	Monitor failures for a given skill (to bias skill selection)
-	# 	"""
-	# 	self.L_skills_results[skill_indx].append(0)
-	#
-	# 	if len(self.L_skills_results[skill_indx]) > self.skill_window:
-	# 		self.L_skills_results[skill_indx].pop(0)
-	#
-	# 	return
-	#
-	# def get_skill_success_rate(self, skill_indx):
-	#
-	# 	nb_skills_success = self.L_skills_results[skill_indx].count(1)
-	# 	s_r = float(nb_skills_success/len(self.L_skills_results[skill_indx]))
-	#
-	# 	## keep a small probability for successful skills to be selected in order
-	# 	## to avoid catastrophic forgetting
-	# 	if s_r <= 0.1:
-	# 		s_r = 10
-	# 	else:
-	# 		s_r = 1./s_r
-	#
-	# 	return s_r
-	#
-	# def get_skills_success_rates(self):
-	#
-	# 	L_rates = []
-	# 	for i in range(self.delta_step, len(self.L_states)):
-	# 		L_rates.append(self.get_skill_success_rate(i))
-	#
-	# 	return L_rates
+
+	def add_success(self, skill_indx):
+		"""
+		Monitor successes for a given skill (to bias skill selection)
+		"""
+		self.L_skills_results[skill_indx].append(1)
+
+		if len(self.L_skills_results[skill_indx]) > self.skill_window:
+			self.L_skills_results[skill_indx].pop(0)
+
+		return
+
+	def add_failure(self, skill_indx):
+		"""
+		Monitor failures for a given skill (to bias skill selection)
+		"""
+		self.L_skills_results[skill_indx].append(0)
+
+		if len(self.L_skills_results[skill_indx]) > self.skill_window:
+			self.L_skills_results[skill_indx].pop(0)
+
+		return
+
+	def get_skill_success_rate(self, skill_indx):
+
+		nb_skills_success = self.L_skills_results[skill_indx].count(1)
+		s_r = float(nb_skills_success/len(self.L_skills_results[skill_indx]))
+
+		## keep a small probability for successful skills to be selected in order
+		## to avoid catastrophic forgetting
+		if s_r <= 0.1:
+			s_r = 10
+		else:
+			s_r = 1./s_r
+
+		return s_r
+
+	def get_skills_success_rates(self):
+
+		L_rates = []
+		for i in range(self.delta_step, len(self.L_states)):
+			L_rates.append(self.get_skill_success_rate(i))
+
+		return L_rates
 
 
 	def sample_skill_indx(self):
@@ -305,19 +301,15 @@ class SkillsManager():
 		else:
 			self.indx_goal = sampled_skill_indx
 
-		# print("self.indx_goal = ", self.indx_goal)
-
 		## skill indx coorespond to a goal indx
 		self.indx_start = (self.indx_goal - self.delta_step)
-
-		# print("self.indx_start = ", self.indx_start)
 
 		length_skill = self.L_budgets[self.indx_start]
 
 		starting_state = self.get_starting_state(self.indx_start)
 		goal_state = self.get_goal_state(self.indx_goal)
 
-		return starting_state, length_skill, goal_state
+		return starting_state, length_skill, goal_state, next_skill_avail
 
 
 	def _random_skill(self):
