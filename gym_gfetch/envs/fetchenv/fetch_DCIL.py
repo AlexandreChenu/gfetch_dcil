@@ -348,7 +348,7 @@ class GFetchDCIL(GFetchGoal):
 
         self.truncation = None
         self.max_episode_steps = 50
-        self.do_overshoot = False
+        self.do_overshoot = True
 
         self.demo_path = demo_path
         self.skill_manager = SkillsManager(self.demo_path, self) ## skill length in time-steps

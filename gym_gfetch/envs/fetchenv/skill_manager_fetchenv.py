@@ -35,9 +35,9 @@ class SkillsManager():
 
 		self.L_states, self.L_sim_states, self.L_budgets = self.clean_demo(self.L_full_demonstration)
 
-		self.L_states = self.L_states[-4:]
-		self.L_sim_states = self.L_sim_states[-4:]
-		self.L_budgets = self.L_budgets[-3:]
+		#self.L_states = self.L_states[-4:]
+		#self.L_sim_states = self.L_sim_states[-4:]
+		#self.L_budgets = self.L_budgets[-3:]
 
 		# print("self.L_budgets = ", self.L_budgets)
 
