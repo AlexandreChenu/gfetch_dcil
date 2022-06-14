@@ -27,7 +27,7 @@ import torch
 from matplotlib import collections as mc
 # from IPython import embed
 
-from .skill_manager_fetchenv import SkillsManager
+# from .skill_manager_fetchenv import SkillsManager
 # from skill_manager_fetchenv import SkillsManager
 
 import gym
@@ -128,7 +128,7 @@ class GFetch(mujoco_env.MujocoEnv, utils.EzPickle, ABC):
         self.done = False
         self.steps = 0
 
-        self.max_episode_steps = 10
+        self.max_episode_steps = 50
 
         self.rooms = []
 
@@ -170,9 +170,7 @@ class GFetch(mujoco_env.MujocoEnv, utils.EzPickle, ABC):
 
 
     def state_vector(self):
-        state = self.env._get_full_state()
-        self.state = state.copy()
-        return self.state
+        return self.state.copy()
 
     def render(self):
         return self.env.render()
@@ -206,7 +204,7 @@ def default_compute_reward(
         # if torch.is_tensor(achieved_goal):
         #     return (d < distance_threshold).double()
         # else:
-        return 1.0 * (d < distance_threshold)
+        return 1.0 * (d <= distance_threshold)
     else:
         return -d
 
@@ -214,7 +212,8 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
     def __init__(self):
         super().__init__()
 
-        self._goal_dim = 6 ## TODO: set automatically
+        self.reset_model()
+        self._goal_dim = self.project_to_goal_space(self.state).shape[0] ## TODO: set automatically
         high_goal = np.ones(self._goal_dim)
         low_goal = -high_goal
 
@@ -238,6 +237,13 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
         self._is_success = None
         # self.set_success_function(default_success_function)
 
+    def get_obs_dim(self):
+        return self.get_state()[0].shape[0]
+
+
+    def get_goal_dim(self):
+        return self._goal_dim
+
     @torch.no_grad()
     def goal_distance(self, goal_a, goal_b):
         # assert goal_a.shape == goal_b.shape
@@ -253,23 +259,25 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
         cur_state = self.state.copy()
 
         new_state, _, done, info =  self.env.step(action)
+        # print("step : ", self.project_to_goal_space(new_state))
+        self.state = new_state
         reward = self.compute_reward(self.project_to_goal_space(new_state), self.goal, {})
 
         truncation = (self.steps >= self.max_episode_steps)
 
-        is_success = reward.copy()
+        is_success = reward.copy().reshape(1,)
         self.is_success = is_success.copy()
 
-        truncation = truncation * (1 - is_success)
+        truncation = truncation * (1 - is_success).reshape(1,)
         info = {'is_success': is_success,
                 'truncation': truncation}
         self.done = (done or bool(truncation)) or bool(is_success)
 
         return (
             {
-                'observation': self.state,
+                'observation': self.state.copy(),
                 'achieved_goal': self.project_to_goal_space(self.state),
-                'desired_goal': self.goal,
+                'desired_goal': self.goal.copy(),
             },
             reward,
             self.done,
@@ -288,25 +296,22 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
         self.steps = 0
         self.state = self.state_vector()
         return {
-            'observation': self.state,
+            'observation': self.state.copy(),
             'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal,
+            'desired_goal': self.goal.copy(),
         }
 
     def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
 
-        self.reset_model()
-
-        newgoal = self._sample_goal()  # sample goal
-        self.goal = newgoal.copy()
-
+        # self.reset_model() ## do not force reset model if overshoot used
+        self.goal = self._sample_goal()
         self.steps = 0.
         self.state = self.state_vector()
 
         return {
-            'observation': self.state,
+            'observation': self.state.copy(),
             'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal,
+            'desired_goal': self.goal.copy(),
         }
 
     @torch.no_grad()
@@ -335,198 +340,199 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 
         return object_pos
 
+    def set_state(self, sim_state, set_state):
+        if set_state:
+            self.env.set_inner_state(sim_state)
+            self.state = self.env._get_full_state().copy()
 
-class GFetchDCIL(GFetchGoal):
-    def __init__(self, demo_path):
-        super().__init__()
+    def get_state(self):
+        state = (self.state.copy(), self.env.get_inner_state())
+        return state
 
-        self.done = False
-        ## fake init as each variable is modified after first reset
-        self.steps = 0
-        self.is_success = 0
-        self.goal = None
-
-        self.truncation = None
-        self.max_episode_steps = 50
-        self.do_overshoot = True
-
-        self.demo_path = demo_path
-        self.skill_manager = SkillsManager(self.demo_path, self) ## skill length in time-steps
-
-
-    @torch.no_grad()
-    def step(self,action):
-
-        infos = []
-        cur_state = self.state.copy()
-
-        ## update observation (sequential)
-        new_state, _, done, info =  self.env.step(action)
-        infos.append(info)
-
-        self.state = new_state.copy()
-
-        reward = self.compute_reward(self.project_to_goal_space(self.state), self.goal, {})
-        self.steps += 1
-
-        truncation = (self.steps >= self.max_episode_steps)
-
-        is_success = reward.copy()
-        self.is_success = is_success.copy()
-
-        truncation = truncation * (1 - is_success)
-        info = {'is_success': is_success,
-                'truncation': truncation}
-
-        # print("\nis_success = ", is_success)
-        # print("truncation = ", truncation)
-        # print("done from step = ", done)
-        # self.done = (done or bool(truncation)) or bool(is_success)
-        self.done = bool(truncation) or bool(is_success)
-        # print("self.done = ", self.done)
-
-        ## get next goal and next goal availability boolean
-        next_goal_state, info['next_goal_avail'] = self.skill_manager.next_goal()
-        info['next_goal'] = self.project_to_goal_space(next_goal_state)
-
-        return (
-            {
-                'observation': self.state.copy(),
-                'achieved_goal': self.project_to_goal_space(self.state).copy(),
-                'desired_goal': self.goal.copy(),
-            },
-            reward,
-            self.done,
-            info,
-        )
-
-    def set_skill(self, skill_indx):
-        start_state, length_skill, goal_state = self.skill_manager.set_skill(skill_indx)
-        start_obs, start_sim_state = start_state
-
-        ## set sim state for each environment
-        self.env.sim.set_state(start_sim_state)
-
-        goal = self.project_to_goal_space(goal_state)
-        self.state = start_state.copy()
-        self.steps = 0
-        self.goal = goal
-
+    def get_observation(self):
         return {
             'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state).copy(),
+            'achieved_goal': self.project_to_goal_space(self.state),
             'desired_goal': self.goal.copy(),
         }
 
-    def shift_goal(self):
-        goal_state, _ = self.skill_manager.shift_goal()
-        goal = self.project_to_goal_space(goal_state)
-        self.steps = 0
-        self.goal = goal
+    def set_goal(self, goal, set_goal):
+        if set_goal:
+            self.goal = goal.copy()
 
-        return {
-            'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state).copy(),
-            'desired_goal': self.goal.copy(),
-        }
+    def get_goal(self):
+        return self.goal.copy()
 
-    @torch.no_grad()
-    def _select_skill(self):
-        ## done indicates indx to change
-        ## overshoot indicates indx to shift by one
-        ## is success indicates if we should overshoot
-        return self.skill_manager._select_skill(self.done, self.is_success, do_overshoot = self.do_overshoot)
+    def set_max_episode_steps(self, max_episode_steps, set_steps):
+        if set_steps:
+            self.max_episode_steps = max_episode_steps
 
-    @torch.no_grad()
-    def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
-
-        _start_state, length_skill, goal_state, overshoot_possible = self._select_skill()
-        start_state, start_sim_state = _start_state
-
-        if self.done:
-            if self.is_success:
-                self.skill_manager.add_success(self.skill_manager.indx_goal)
-            else:
-                self.skill_manager.add_failure(self.skill_manager.indx_goal)
-
-        ## reset robot to known state if no overshoot possible
-        if not (self.is_success and self.do_overshoot and overshoot_possible):
-            self.env.sim.set_state(start_sim_state)
-            self.state = start_state.copy()
-
-        goal = self.project_to_goal_space(goal_state)
-        self.goal = goal.copy()
-
-        self.steps = 0
-        self.max_episode_steps = length_skill
-
-        #achieved_goal = self.project_to_goal_space(self.state)
-        # print("achieved goal from reset_done = ", achieved_goal)
-        # sys.stdout.flush()
-
-        return {
-            'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state).copy(),
-            'desired_goal': self.goal.copy(),
-        }
-
-    @torch.no_grad()
-    def reset(self, options=None, seed: Optional[int] = None, infos=None):
-
-        init_indx = 1
-        _start_state, length_skill, goal_state = self.skill_manager.get_skill(init_indx)
-        start_state, start_sim_state = _start_state
-
-        ## set sim state for each environment
-        self.env.sim.set_state(start_sim_state)
-        self.state = start_state.copy()
-
-        self.max_episode_steps = length_skill
-        self.steps = 0
-
-        goal = self.project_to_goal_space(goal_state)
-        self.goal = goal.copy()
-
-        achieved_goal = self.project_to_goal_space(self.state)
-        # print("achieved goal from reset = ", achieved_goal)
-        # sys.stdout.flush()
-
-        return {
-            'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state).copy(),
-            'desired_goal': self.goal.copy(),
-        }
+#
+# class GFetchDCIL(GFetchGoal):
+#     def __init__(self, demo_path):
+#         super().__init__()
+#
+#         self.done = False
+#         ## fake init as each variable is modified after first reset
+#         self.steps = 0
+#         self.is_success = 0
+#         self.goal = None
+#
+#         self.truncation = None
+#         self.max_episode_steps = 50
+#         self.do_overshoot = True
+#
+#         self.demo_path = demo_path
+#         self.skill_manager = SkillsManager(self.demo_path, self) ## skill length in time-steps
+#
+#
+#     @torch.no_grad()
+#     def step(self,action):
+#
+#         infos = []
+#         cur_state = self.state.copy()
+#
+#         ## update observation (sequential)
+#         new_state, _, done, info =  self.env.step(action)
+#         infos.append(info)
+#
+#         self.state = new_state.copy()
+#
+#         reward = self.compute_reward(self.project_to_goal_space(self.state), self.goal, {})
+#         self.steps += 1
+#
+#         truncation = (self.steps >= self.max_episode_steps)
+#
+#         is_success = reward.copy()
+#         self.is_success = is_success.copy()
+#
+#         truncation = truncation * (1 - is_success)
+#         info = {'is_success': is_success,
+#                 'truncation': truncation}
+#
+#         # print("\nis_success = ", is_success)
+#         # print("truncation = ", truncation)
+#         # print("done from step = ", done)
+#         # self.done = (done or bool(truncation)) or bool(is_success)
+#         self.done = bool(truncation) or bool(is_success)
+#         # print("self.done = ", self.done)
+#
+#         ## get next goal and next goal availability boolean
+#         next_goal_state, info['next_goal_avail'] = self.skill_manager.next_goal()
+#         info['next_goal'] = self.project_to_goal_space(next_goal_state)
+#
+#         return (
+#             {
+#                 'observation': self.state.copy(),
+#                 'achieved_goal': self.project_to_goal_space(self.state).copy(),
+#                 'desired_goal': self.goal.copy(),
+#             },
+#             reward,
+#             self.done,
+#             info,
+#         )
+#
+#     def set_skill(self, skill_indx):
+#         start_state, length_skill, goal_state = self.skill_manager.set_skill(skill_indx)
+#         start_obs, start_sim_state = start_state
+#
+#         ## set sim state for each environment
+#         self.env.sim.set_state(start_sim_state)
+#
+#         goal = self.project_to_goal_space(goal_state)
+#         self.state = start_state.copy()
+#         self.steps = 0
+#         self.goal = goal
+#
+#         return {
+#             'observation': self.state.copy(),
+#             'achieved_goal': self.project_to_goal_space(self.state).copy(),
+#             'desired_goal': self.goal.copy(),
+#         }
+#
+#     def shift_goal(self):
+#         goal_state, _ = self.skill_manager.shift_goal()
+#         goal = self.project_to_goal_space(goal_state)
+#         self.steps = 0
+#         self.goal = goal
+#
+#         return {
+#             'observation': self.state.copy(),
+#             'achieved_goal': self.project_to_goal_space(self.state).copy(),
+#             'desired_goal': self.goal.copy(),
+#         }
+#
+#     @torch.no_grad()
+#     def _select_skill(self):
+#         ## done indicates indx to change
+#         ## overshoot indicates indx to shift by one
+#         ## is success indicates if we should overshoot
+#         return self.skill_manager._select_skill(self.done, self.is_success, do_overshoot = self.do_overshoot)
+#
+#     @torch.no_grad()
+#     def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
+#
+#         _start_state, length_skill, goal_state, overshoot_possible = self._select_skill()
+#         start_state, start_sim_state = _start_state
+#
+#         if self.done:
+#             if self.is_success:
+#                 self.skill_manager.add_success(self.skill_manager.indx_goal)
+#             else:
+#                 self.skill_manager.add_failure(self.skill_manager.indx_goal)
+#
+#         ## reset robot to known state if no overshoot possible
+#         if not (self.is_success and self.do_overshoot and overshoot_possible):
+#             self.env.sim.set_state(start_sim_state)
+#             self.state = start_state.copy()
+#
+#         goal = self.project_to_goal_space(goal_state)
+#         self.goal = goal.copy()
+#
+#         self.steps = 0
+#         self.max_episode_steps = length_skill
+#
+#         #achieved_goal = self.project_to_goal_space(self.state)
+#         # print("achieved goal from reset_done = ", achieved_goal)
+#         # sys.stdout.flush()
+#
+#         return {
+#             'observation': self.state.copy(),
+#             'achieved_goal': self.project_to_goal_space(self.state).copy(),
+#             'desired_goal': self.goal.copy(),
+#         }
+#
+#     @torch.no_grad()
+#     def reset(self, options=None, seed: Optional[int] = None, infos=None):
+#
+#         init_indx = 1
+#         _start_state, length_skill, goal_state = self.skill_manager.get_skill(init_indx)
+#         start_state, start_sim_state = _start_state
+#
+#         ## set sim state for each environment
+#         self.env.sim.set_state(start_sim_state)
+#         self.state = start_state.copy()
+#
+#         self.max_episode_steps = length_skill
+#         self.steps = 0
+#
+#         goal = self.project_to_goal_space(goal_state)
+#         self.goal = goal.copy()
+#
+#         achieved_goal = self.project_to_goal_space(self.state)
+#         # print("achieved goal from reset = ", achieved_goal)
+#         # sys.stdout.flush()
+#
+#         return {
+#             'observation': self.state.copy(),
+#             'achieved_goal': self.project_to_goal_space(self.state).copy(),
+#             'desired_goal': self.goal.copy(),
+#         }
 
 
 if (__name__=='__main__'):
 
-    # demo_filename = "/Users/chenu/Desktop/PhD/github/dcil/demos/fetchenv/demo_set/1.demo"
-    # L_inner_states = []
-    # print("filename :\n", demo_filename)
-    #
-    # if not os.path.isfile(demo_filename):
-    #     print ("File does not exist.")
-    #
-    # with open(demo_filename, "rb") as f:
-    #     demo = pickle.load(f)
-    #
-    # for i in range(len(demo["checkpoints"])):
-    #     L_inner_states.append(demo["checkpoints"][i])
-    #
-    # print(L_inner_states)
-    #
-    # for i in range(len(L_inner_states)):
-    #     L_inner_states[i] = (L_inner_states[i][0],
-    #                             L_inner_states[i][1],
-    #                             L_inner_states[i][2],
-    #                             L_inner_states[i][3][:268],
-    #                             L_inner_states[i][4],
-    #                             L_inner_states[i][5],
-    #                             L_inner_states[i][6],
-    #                             L_inner_states[i][7],
-    #                             L_inner_states[i][8])
-
-    env = GFetchDCIL()
+    env = GFetchGoal()
 
     obs = env.reset()
     print("obs = ", obs)
@@ -534,6 +540,7 @@ if (__name__=='__main__'):
     for i in range(30):
         env.env.render()
         action = env.action_space.sample()
+        print("sim_state = ", env.sim.get_state())
         obs, reward, done, info = env.step(action)
 
         if done:
@@ -542,35 +549,3 @@ if (__name__=='__main__'):
     print("obs = ", obs)
     print("done = ", done)
     print("info = ", info)
-
-    # env = GFetchDCIL(device="cpu", num_envs = 2)
-    #
-    # obs = env.reset()
-    # print("obs = ", obs)
-    #
-    # print(env.compute_reward)
-    # print(env.project_to_goal_space)
-    #
-    # for i in range(30):
-    #     env.env.render()
-    #     action = env.action_space.sample()
-    #     obs, reward, done, info = env.step(action)
-    #
-    #     if max(done) == 1:
-    #         env.reset_done()
-    #
-    #     print("done = ", done)
-
-
-
-
-    # new_env = MyComplexFetchEnv()
-    #
-    # new_env.reset()
-    #
-    # new_env.sim.set_state(sim_state)
-    #
-    # for i in range(10):
-    #     new_env.env.render()
-    #     action = new_env.env.action_space.sample()
-    #     obs, reward, done, info = new_env.step(action)
