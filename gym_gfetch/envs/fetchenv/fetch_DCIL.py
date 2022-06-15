@@ -197,7 +197,7 @@ def default_compute_reward(
         desired_goal: Union[np.ndarray, torch.Tensor],
         info: dict
 ):
-    distance_threshold = 0.05
+    distance_threshold = 0.075
     reward_type = "sparse"
     d = goal_distance(achieved_goal, desired_goal)
     if reward_type == "sparse":
@@ -273,6 +273,8 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
                 'truncation': truncation}
         self.done = (done or bool(truncation)) or bool(is_success)
 
+        # print("observation env = ", self.state[:15])
+
         return (
             {
                 'observation': self.state.copy(),
@@ -320,7 +322,7 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
         object_pos = self.get_object_pos(state)
 
         return np.concatenate((gripper_pos, object_pos), axis=-1)
-        # return gripper_pos
+        # return gripper_posZ
 
     def get_gripper_pos(self, state):
         """
@@ -366,6 +368,10 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
     def set_max_episode_steps(self, max_episode_steps, set_steps):
         if set_steps:
             self.max_episode_steps = max_episode_steps
+            self.steps = 0
+
+    def get_max_episode_steps(self):
+        return self.max_episode_steps
 
 #
 # class GFetchDCIL(GFetchGoal):
