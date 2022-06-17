@@ -128,7 +128,7 @@ class GFetch(mujoco_env.MujocoEnv, utils.EzPickle, ABC):
         self.done = False
         self.steps = 0
 
-        self.max_episode_steps = 50
+        self.max_episode_steps = 70
 
         self.rooms = []
 
@@ -204,7 +204,8 @@ def default_compute_reward(
         # if torch.is_tensor(achieved_goal):
         #     return (d < distance_threshold).double()
         # else:
-        return 1.0 * (d <= distance_threshold)
+        # return 1.0 * (d <= distance_threshold) - 1.0
+        return -1.0 * (d > distance_threshold) 
     else:
         return -d
 
@@ -265,7 +266,8 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 
         truncation = (self.steps >= self.max_episode_steps)
 
-        is_success = reward.copy().reshape(1,)
+        is_success = reward.copy().reshape(1,) + 1.
+
         self.is_success = is_success.copy()
 
         truncation = truncation * (1 - is_success).reshape(1,)
