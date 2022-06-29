@@ -40,7 +40,7 @@ import mujoco_py
 
 from gym.envs.mujoco import mujoco_env
 # except Exception:
-    # print('WARNING: could not import mujoco_py. This means robotics environments will not work')
+	# print('WARNING: could not import mujoco_py. This means robotics environments will not work')
 import gym.spaces
 from scipy.spatial.transform import Rotation
 from collections import defaultdict, namedtuple
@@ -55,325 +55,328 @@ else:
 
 
 class GoalEnv(gym.Env):
-    """The GoalEnv class that was migrated from gym (v0.22) to gym-robotics"""
+	"""The GoalEnv class that was migrated from gym (v0.22) to gym-robotics"""
 
-    def reset(self, options=None, seed: Optional[int] = None, infos=None):
-        super().reset(seed=seed)
-        # Enforce that each GoalEnv uses a Goal-compatible observation space.
-        if not isinstance(self.observation_space, gym.spaces.Dict):
-            raise error.Error(
-                "GoalEnv requires an observation space of type gym.spaces.Dict"
-            )
-        for key in ["observation", "achieved_goal", "desired_goal"]:
-            if key not in self.observation_space.spaces:
-                raise error.Error('GoalEnv requires the "{}" key.'.format(key))
+	def reset(self, options=None, seed: Optional[int] = None, infos=None):
+		super().reset(seed=seed)
+		# Enforce that each GoalEnv uses a Goal-compatible observation space.
+		if not isinstance(self.observation_space, gym.spaces.Dict):
+			raise error.Error(
+				"GoalEnv requires an observation space of type gym.spaces.Dict"
+			)
+		for key in ["observation", "achieved_goal", "desired_goal"]:
+			if key not in self.observation_space.spaces:
+				raise error.Error('GoalEnv requires the "{}" key.'.format(key))
 
-    @abstractmethod
-    def compute_reward(self, achieved_goal, desired_goal, info):
-        """Compute the step reward.
-        Args:
-            achieved_goal (object): the goal that was achieved during execution
-            desired_goal (object): the desired goal
-            info (dict): an info dictionary with additional information
-        Returns:
-            float: The reward that corresponds to the provided achieved goal w.r.t. to
-            the desired goal. Note that the following should always hold true:
-                ob, reward, done, info = env.step()
-                assert reward == env.compute_reward(ob['achieved_goal'],
-                                                    ob['desired_goal'], info)
-        """
-        raise NotImplementedError
+	@abstractmethod
+	def compute_reward(self, achieved_goal, desired_goal, info):
+		"""Compute the step reward.
+		Args:
+			achieved_goal (object): the goal that was achieved during execution
+			desired_goal (object): the desired goal
+			info (dict): an info dictionary with additional information
+		Returns:
+			float: The reward that corresponds to the provided achieved goal w.r.t. to
+			the desired goal. Note that the following should always hold true:
+				ob, reward, done, info = env.step()
+				assert reward == env.compute_reward(ob['achieved_goal'],
+													ob['desired_goal'], info)
+		"""
+		raise NotImplementedError
 
 
 @torch.no_grad()
 def default_reward_fun(action, new_obs):
-    return 0.
+	return 0.
 
 ## interface vers ComplexFetchEnv
 class GFetch(mujoco_env.MujocoEnv, utils.EzPickle, ABC):
-    TARGET_SHAPE = 0
-    MAX_PIX_VALUE = 0
+	TARGET_SHAPE = 0
+	MAX_PIX_VALUE = 0
 
-    def __init__(self, model_file='teleOp_boxes_1.xml', nsubsteps=20, min_grip_score=0, max_grip_score=0,
-                 target_single_shelf=False, combine_table_shelf_box=False, ordered_grip=False,
-                 target_location='1000', timestep=0.002, force_closed_doors=False):
-
-
-        self.env = ComplexFetchEnv(
-            model_file=model_file, nsubsteps=nsubsteps,
-            min_grip_score=min_grip_score, max_grip_score=max_grip_score,
-            #ret_full_state=False,
-            ret_full_state=True,
-            target_single_shelf=target_single_shelf,
-            combine_table_shelf_box=combine_table_shelf_box, ordered_grip=ordered_grip,
-            target_location=target_location, timestep=timestep,
-            force_closed_doors=force_closed_doors
-        )
-
-        self.action_space = self.env.action_space
-
-        self.observation_space = self.env.observation_space
-
-        self.set_reward_function(default_reward_fun)
-
-        init_state = self.env.reset()
-        self.init_state = init_state.copy()
-
-        self.init_sim_state = self.env.sim.get_state()
-        self.init_qpos = self.init_sim_state.qpos.copy()
-        self.init_qvel = self.init_sim_state.qvel.copy()
+	def __init__(self, model_file='teleOp_boxes_1.xml', nsubsteps=20, min_grip_score=0, max_grip_score=0,
+				 target_single_shelf=False, combine_table_shelf_box=False, ordered_grip=False,
+				 target_location='1000', timestep=0.002, force_closed_doors=False):
 
 
-        self.state = self.init_state.copy()
-        self.done = False
-        self.steps = 0
+		self.env = ComplexFetchEnv(
+			model_file=model_file, nsubsteps=nsubsteps,
+			min_grip_score=min_grip_score, max_grip_score=max_grip_score,
+			#ret_full_state=False,
+			ret_full_state=True,
+			target_single_shelf=target_single_shelf,
+			combine_table_shelf_box=combine_table_shelf_box, ordered_grip=ordered_grip,
+			target_location=target_location, timestep=timestep,
+			force_closed_doors=force_closed_doors
+		)
 
-        self.max_episode_steps = 70
+		self.action_space = self.env.action_space
 
-        self.rooms = []
+		self.observation_space = self.env.observation_space
 
-    def __getattr__(self, e):
-        assert self.env is not self
-        return getattr(self.env, e)
+		self.set_reward_function(default_reward_fun)
 
-    def set_reward_function(self, reward_function):
-        self.compute_reward = (
-            reward_function  # the reward function is not defined by the environment
-        )
+		init_state = self.env.reset()
+		self.init_state = init_state.copy()
 
-    def reset_model(self, env_indices=None) -> np.ndarray:
-        """
-        Reset environments to initial simulation state & return vector state
-        """
-        self.env.sim.set_state(self.init_sim_state)
-
-        return self.state_vector()
-
-    def reset(self, options=None, seed: Optional[int] = None, infos=None):
-        self.reset_model()
-        self.steps = 0
-        return self.state_vector()
-
-    def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
-        self.reset_model()
-        self.steps = 0
-        return self.state_vector()
-
-    def step(self, action):
-        self.steps += 1
-        new_obs, _, done, info =  self.env.step(action)
-        reward = self.compute_reward(action, new_obs)
-        self.done = done
-        truncation = (self.steps > self.max_episode_steps)
-        self.done = (self.done or truncation)
-        return self.state_vector(), reward, self.done, info
+		self.init_sim_state = self.env.sim.get_state()
+		self.init_qpos = self.init_sim_state.qpos.copy()
+		self.init_qvel = self.init_sim_state.qvel.copy()
 
 
-    def state_vector(self):
-        return self.state.copy()
+		self.state = self.init_state.copy()
+		self.done = False
+		self.steps = 0
 
-    def render(self):
-        return self.env.render()
+		self.max_episode_steps = 70
 
-    def plot(self, ax):
-        pass
+		self.rooms = []
+
+	def __getattr__(self, e):
+		assert self.env is not self
+		return getattr(self.env, e)
+
+	def set_reward_function(self, reward_function):
+		self.compute_reward = (
+			reward_function  # the reward function is not defined by the environment
+		)
+
+	def reset_model(self, env_indices=None) -> np.ndarray:
+		"""
+		Reset environments to initial simulation state & return vector state
+		"""
+		self.env.sim.set_state(self.init_sim_state)
+
+		return self.state_vector()
+
+	def reset(self, options=None, seed: Optional[int] = None, infos=None):
+		self.reset_model()
+		self.steps = 0
+		return self.state_vector()
+
+	def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
+		self.reset_model()
+		self.steps = 0
+		return self.state_vector()
+
+	def step(self, action):
+		self.steps += 1
+		new_obs, _, done, info =  self.env.step(action)
+		reward = self.compute_reward(action, new_obs)
+		self.done = done
+		truncation = (self.steps > self.max_episode_steps)
+		self.done = (self.done or truncation)
+		return self.state_vector(), reward, self.done, info
+
+
+	def state_vector(self):
+		return self.state.copy()
+
+	def render(self):
+		return self.env.render()
+
+	def plot(self, ax):
+		pass
 
 
 @torch.no_grad()
 def goal_distance(goal_a, goal_b):
-    # assert goal_a.shape == goal_b.shape
-    #print("\ngoal_a = ", goal_a)
-    #print("goal_b = ", goal_b)
-    #print("d = ", np.linalg.norm(goal_a - goal_b, axis=-1))
-    if torch.is_tensor(goal_a):
-        return torch.linalg.norm(goal_a - goal_b, axis=-1)
-    else:
-        return np.linalg.norm(goal_a - goal_b, axis=-1)
+	# assert goal_a.shape == goal_b.shape
+	#print("\ngoal_a = ", goal_a)
+	#print("goal_b = ", goal_b)
+	#print("d = ", np.linalg.norm(goal_a - goal_b, axis=-1))
+	if torch.is_tensor(goal_a):
+		return torch.linalg.norm(goal_a - goal_b, axis=-1)
+	else:
+		return np.linalg.norm(goal_a - goal_b, axis=-1)
 
 
 @torch.no_grad()
 def default_compute_reward(
-        achieved_goal: Union[np.ndarray, torch.Tensor],
-        desired_goal: Union[np.ndarray, torch.Tensor],
-        info: dict
+		achieved_goal: Union[np.ndarray, torch.Tensor],
+		desired_goal: Union[np.ndarray, torch.Tensor],
+		info: dict
 ):
-    distance_threshold = 0.075
-    reward_type = "sparse"
-    d = goal_distance(achieved_goal, desired_goal)
-    if reward_type == "sparse":
-        # if torch.is_tensor(achieved_goal):
-        #     return (d < distance_threshold).double()
-        # else:
-        return 1.0 * (d <= distance_threshold)
-        # return -1.0 * (d > distance_threshold)
-    else:
-        return -d
+	distance_threshold = 0.075
+	reward_type = "sparse"
+	d = goal_distance(achieved_goal, desired_goal)
+	if reward_type == "sparse":
+		# if torch.is_tensor(achieved_goal):
+		#     return (d < distance_threshold).double()
+		# else:
+		return 1.0 * (d <= distance_threshold)
+		# return -1.0 * (d > distance_threshold)
+	else:
+		return -d
 
 class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
-    def __init__(self):
-        super().__init__()
+	def __init__(self):
+		super().__init__()
 
-        self.reset_model()
-        self._goal_dim = self.project_to_goal_space(self.state).shape[0] ## TODO: set automatically
-        high_goal = np.ones(self._goal_dim)
-        low_goal = -high_goal
+		self.reset_model()
+		self._goal_dim = self.project_to_goal_space(self.state).shape[0] ## TODO: set automatically
+		high_goal = np.ones(self._goal_dim)
+		low_goal = -high_goal
 
-        self.observation_space = spaces.Dict(
-            dict(
-                observation=self.env.observation_space,
-                achieved_goal=spaces.Box(
-                    low_goal, high_goal, dtype=np.float64
-                ),
-                desired_goal=spaces.Box(
-                    low_goal, high_goal, dtype=np.float64
-                ),
-            )
-        )
+		self.observation_space = spaces.Dict(
+			dict(
+				observation=self.env.observation_space,
+				achieved_goal=spaces.Box(
+					low_goal, high_goal, dtype=np.float64
+				),
+				desired_goal=spaces.Box(
+					low_goal, high_goal, dtype=np.float64
+				),
+			)
+		)
 
-        self.goal = None
+		self.goal = None
 
-        self.compute_reward = None
-        self.set_reward_function(default_compute_reward)
+		self.compute_reward = None
+		self.set_reward_function(default_compute_reward)
 
-        self._is_success = None
-        # self.set_success_function(default_success_function)
+		self._is_success = None
+		# self.set_success_function(default_success_function)
 
-    def get_obs_dim(self):
-        return self.get_state()[0].shape[0]
-
-
-    def get_goal_dim(self):
-        return self._goal_dim
-
-    @torch.no_grad()
-    def goal_distance(self, goal_a, goal_b):
-        # assert goal_a.shape == goal_b.shape
-        if torch.is_tensor(goal_a):
-            return torch.linalg.norm(goal_a - goal_b, axis=-1)
-        else:
-            return np.linalg.norm(goal_a - goal_b, axis=-1)
+	def get_obs_dim(self):
+		return self.get_state()[0].shape[0]
 
 
-    @torch.no_grad()
-    def step(self, action):
-        self.steps += 1
-        cur_state = self.state.copy()
+	def get_goal_dim(self):
+		return self._goal_dim
 
-        new_state, _, done, info =  self.env.step(action)
-        # print("step : ", self.project_to_goal_space(new_state))
-        self.state = new_state
-        reward = self.compute_reward(self.project_to_goal_space(new_state), self.goal, {})
+	@torch.no_grad()
+	def goal_distance(self, goal_a, goal_b):
+		# assert goal_a.shape == goal_b.shape
+		if torch.is_tensor(goal_a):
+			return torch.linalg.norm(goal_a - goal_b, axis=-1)
+		else:
+			return np.linalg.norm(goal_a - goal_b, axis=-1)
 
-        truncation = (self.steps >= self.max_episode_steps)
 
-        is_success = reward.copy().reshape(1,)
+	@torch.no_grad()
+	def step(self, action):
+		self.steps += 1
+		cur_state = self.state.copy()
 
-        self.is_success = is_success.copy()
+		new_state, _, done, info =  self.env.step(action)
+		# print("step : ", self.project_to_goal_space(new_state))
+		self.state = new_state
+		reward = self.compute_reward(self.project_to_goal_space(new_state), self.goal, {})
 
-        truncation = truncation * (1 - is_success).reshape(1,)
-        info = {'is_success': is_success,
-                'truncation': truncation}
-        self.done = (done or bool(truncation)) or bool(is_success)
+		truncation = (self.steps >= self.max_episode_steps)
 
-        # print("observation env = ", self.state[:15])
+		is_success = reward.copy().reshape(1,)
 
-        return (
-            {
-                'observation': self.state.copy(),
-                'achieved_goal': self.project_to_goal_space(self.state),
-                'desired_goal': self.goal.copy(),
-            },
-            reward,
-            self.done,
-            info,
-        )
+		self.is_success = is_success.copy()
 
-    @torch.no_grad()
-    def _sample_goal(self):
-        # return (torch.rand(self.num_envs, 2) * 2. - 1).to(self.device)
-        return np.random.uniform(-1.,1., size=self._goal_dim)
+		done = torch.zeros(is_success.shape)
 
-    @torch.no_grad()
-    def reset(self, options=None, seed: Optional[int] = None, infos=None):
-        self.reset_model()  # reset state to initial value
-        self.goal = self._sample_goal()  # sample goal
-        self.steps = 0
-        self.state = self.state_vector()
-        return {
-            'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal.copy(),
-        }
+		truncation = truncation * (1 - is_success).reshape(1,)
+		info = {'is_success': is_success,
+				'done_from_env': done,
+				'truncation': truncation}
+		self.done = (done or bool(truncation)) or bool(is_success)
 
-    def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
+		# print("observation env = ", self.state[:15])
 
-        # self.reset_model() ## do not force reset model if overshoot used
-        self.goal = self._sample_goal()
-        self.steps = 0.
-        self.state = self.state_vector()
+		return (
+			{
+				'observation': self.state.copy(),
+				'achieved_goal': self.project_to_goal_space(self.state),
+				'desired_goal': self.goal.copy(),
+			},
+			reward,
+			self.done,
+			info,
+		)
 
-        return {
-            'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal.copy(),
-        }
+	@torch.no_grad()
+	def _sample_goal(self):
+		# return (torch.rand(self.num_envs, 2) * 2. - 1).to(self.device)
+		return np.random.uniform(-1.,1., size=self._goal_dim)
 
-    @torch.no_grad()
-    def project_to_goal_space(self, state):
-        gripper_pos = self.get_gripper_pos(state)
-        object_pos = self.get_object_pos(state)
+	@torch.no_grad()
+	def reset(self, options=None, seed: Optional[int] = None, infos=None):
+		self.reset_model()  # reset state to initial value
+		self.goal = self._sample_goal()  # sample goal
+		self.steps = 0
+		self.state = self.state_vector()
+		return {
+			'observation': self.state.copy(),
+			'achieved_goal': self.project_to_goal_space(self.state),
+			'desired_goal': self.goal.copy(),
+		}
 
-        return np.concatenate((gripper_pos, object_pos), axis=-1)
-        # return gripper_posZ
+	def reset_done(self, options=None, seed: Optional[int] = None, infos=None):
 
-    def get_gripper_pos(self, state):
-        """
-        get gripper position from full state
-        """
-        assert state.shape == (268,)
-        gripper_pos = state[84:87]
+		# self.reset_model() ## do not force reset model if overshoot used
+		self.goal = self._sample_goal()
+		self.steps = 0.
+		self.state = self.state_vector()
 
-        return gripper_pos
+		return {
+			'observation': self.state.copy(),
+			'achieved_goal': self.project_to_goal_space(self.state),
+			'desired_goal': self.goal.copy(),
+		}
 
-    def get_object_pos(self, state):
-        """
-        get object position from full state
-        """
-        assert state.shape == (268,)
-        object_pos = state[105:108]
+	@torch.no_grad()
+	def project_to_goal_space(self, state):
+		gripper_pos = self.get_gripper_pos(state)
+		object_pos = self.get_object_pos(state)
 
-        return object_pos
+		return np.concatenate((gripper_pos, object_pos), axis=-1)
+		# return gripper_posZ
 
-    def set_state(self, sim_state, set_state):
-        if set_state:
-            self.env.set_inner_state(sim_state)
-            self.state = self.env._get_full_state().copy()
+	def get_gripper_pos(self, state):
+		"""
+		get gripper position from full state
+		"""
+		assert state.shape == (268,)
+		gripper_pos = state[84:87]
 
-    def get_state(self):
-        state = (self.state.copy(), self.env.get_inner_state())
-        return state
+		return gripper_pos
 
-    def get_observation(self):
-        return {
-            'observation': self.state.copy(),
-            'achieved_goal': self.project_to_goal_space(self.state),
-            'desired_goal': self.goal.copy(),
-        }
+	def get_object_pos(self, state):
+		"""
+		get object position from full state
+		"""
+		assert state.shape == (268,)
+		object_pos = state[105:108]
 
-    def set_goal(self, goal, set_goal):
-        if set_goal:
-            self.goal = goal.copy()
+		return object_pos
 
-    def get_goal(self):
-        return self.goal.copy()
+	def set_state(self, sim_state, set_state):
+		if set_state:
+			self.env.set_inner_state(sim_state)
+			self.state = self.env._get_full_state().copy()
 
-    def set_max_episode_steps(self, max_episode_steps, set_steps):
-        if set_steps:
-            self.max_episode_steps = max_episode_steps
-            self.steps = 0
+	def get_state(self):
+		state = (self.state.copy(), self.env.get_inner_state())
+		return state
 
-    def get_max_episode_steps(self):
-        return self.max_episode_steps
+	def get_observation(self):
+		return {
+			'observation': self.state.copy(),
+			'achieved_goal': self.project_to_goal_space(self.state),
+			'desired_goal': self.goal.copy(),
+		}
+
+	def set_goal(self, goal, set_goal):
+		if set_goal:
+			self.goal = goal.copy()
+
+	def get_goal(self):
+		return self.goal.copy()
+
+	def set_max_episode_steps(self, max_episode_steps, set_steps):
+		if set_steps:
+			self.max_episode_steps = max_episode_steps
+			self.steps = 0
+
+	def get_max_episode_steps(self):
+		return self.max_episode_steps
 
 #
 # class GFetchDCIL(GFetchGoal):
@@ -540,20 +543,20 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 
 if (__name__=='__main__'):
 
-    env = GFetchGoal()
+	env = GFetchGoal()
 
-    obs = env.reset()
-    print("obs = ", obs)
+	obs = env.reset()
+	print("obs = ", obs)
 
-    for i in range(30):
-        env.env.render()
-        action = env.action_space.sample()
-        print("sim_state = ", env.sim.get_state())
-        obs, reward, done, info = env.step(action)
+	for i in range(30):
+		env.env.render()
+		action = env.action_space.sample()
+		print("sim_state = ", env.sim.get_state())
+		obs, reward, done, info = env.step(action)
 
-        if done:
-            env.reset_done()
+		if done:
+			env.reset_done()
 
-    print("obs = ", obs)
-    print("done = ", done)
-    print("info = ", info)
+	print("obs = ", obs)
+	print("done = ", done)
+	print("info = ", info)
