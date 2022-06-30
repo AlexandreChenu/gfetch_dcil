@@ -270,11 +270,11 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 
 		self.is_success = is_success.copy()
 
-		done = torch.zeros(is_success.shape)
+		#done = torch.zeros(is_success.shape)
 
 		truncation = truncation * (1 - is_success).reshape(1,)
 		info = {'is_success': is_success,
-				'done_from_env': done,
+				'done_from_env': torch.zeros(is_success.shape),
 				'truncation': truncation}
 		self.done = (done or bool(truncation)) or bool(is_success)
 
