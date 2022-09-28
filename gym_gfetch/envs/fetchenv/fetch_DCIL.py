@@ -128,7 +128,7 @@ class GFetch(mujoco_env.MujocoEnv, utils.EzPickle, ABC):
 		self.done = False
 		self.steps = 0
 
-		self.max_episode_steps = 70
+		self.max_episode_steps = 100
 
 		self.rooms = []
 
