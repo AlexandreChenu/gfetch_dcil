@@ -259,7 +259,7 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 		self.steps += 1
 		cur_state = self.state.copy()
 
-		new_state, _, done, info =  self.env.step(action)
+		new_state, reward_from_env, done, info =  self.env.step(action)
 		# print("step : ", self.project_to_goal_space(new_state))
 		self.state = new_state
 		reward = self.compute_reward(self.project_to_goal_space(new_state), self.goal, {})
@@ -275,7 +275,7 @@ class GFetchGoal(GFetch, GoalEnv, utils.EzPickle, ABC):
 		truncation = truncation * (1 - is_success).reshape(1,)
 		info = {'is_success': is_success,
 				'done_from_env': torch.zeros(is_success.shape),
-				'reward_from_env': 0.,
+				'reward_from_env': reward_from_env,
 				'truncation': truncation}
 		self.done = (done or bool(truncation)) or bool(is_success)
 
