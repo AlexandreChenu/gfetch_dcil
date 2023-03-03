@@ -1,5 +1,5 @@
-# gym-gmazes
-Mazes environments for reinforcement learning (with OpenAI Gym interface)
+# gym-gfetch
+Wrapper of the Fetch environment for reinforcement learning (with OpenAI Gym interface)
 
 ## Installation
 
